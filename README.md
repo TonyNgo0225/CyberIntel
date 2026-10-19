@@ -1,93 +1,110 @@
 # CyberIntel
 
-A local Python 3.10+ script that collects CVE mentions from public RSS/Atom feeds,
-enriches them using the CVE Program API, and optionally appends them to an existing
-Google Sheet. No server, AI key, or paid service is required. Provider quotas apply.
+CyberIntel collects cybersecurity stories from RSS/Atom feeds, uses Google AI
+Studio to analyze article pages, and falls back to Groq if Google AI Studio is
+unavailable. Results can be previewed as CSV or appended to Google Sheets. A
+separate CVE collection mode is also available.
 
-## Try it without Google credentials
+## Configure AI providers
 
-```sh
-python cyberintel.py --max-articles 5
+Create an API key in Google AI Studio and, as a backup, a Groq API key. Set the
+keys in your local shell; do not put them in source files or commit them:
+
+```powershell
+$env:GOOGLE_AI_STUDIO_API_KEY = "your-google-ai-studio-key"
+$env:GROQ_API_KEY = "your-groq-key"
 ```
 
-The default is a dry run: it writes `output/vulnerabilities.csv` and never accesses
-Google Sheets. Each run replaces this CSV; it is a preview, not a persistent log.
-The collector itself uses only Python's standard library.
+Google AI Studio is tried first. Groq is used if Google AI Studio fails or its key
+is not set. The defaults are `gemini-2.5-flash` and
+`llama-3.3-70b-versatile`; override them with `GEMINI_MODEL` and `GROQ_MODEL` if
+needed.
 
-Edit `sources.json` to choose HTTPS RSS/Atom feeds. Each entry has a `name` and
-`url`. By default only feed text is scanned. To also look for CVEs in article HTML:
+Edit `sources.json` to add or remove HTTPS RSS/Atom feeds. Two cybersecurity news
+feeds are included as starting sources. The article scanner fetches each feed and
+its linked article page, then sends the text to the configured AI provider for a
+headline, date, concise summary, topics, threats, CVEs, severity, and recommended
+action. Article text is untrusted input and should be checked before acting on
+generated recommendations. Respect each publisher's terms and access policies.
 
-```sh
-python cyberintel.py --max-articles 5 --fetch-articles
-```
+## Preview an AI newsletter scan
 
-Check website terms before enabling article fetching. HTML scanning can include
-related-story links, and JavaScript-only or blocked pages may not work. CVE mentions
-are leads for review, not proof that the article describes an affected product.
+Install the optional Google Sheets dependencies only if you plan to write to a
+sheet:
 
-## Connect your existing Google Sheet
-
-1. Create/select a Google Cloud project and enable the **Google Sheets API**.
-   This workflow does not require a paid AI service or a hosted server.
-2. Create a service account and download a JSON key. Keep it outside the repository;
-   never commit or share it. Your Google organization may restrict key creation.
-3. Share only the target spreadsheet with the service account's email as **Editor**.
-4. Create an empty tab named `Vulnerabilities`, or use `--tab` to choose another tab.
-   For an existing populated tab, A1:E1 must exactly match:
-
-   `Article link`, `CVE`, `Products affected`, `CVE published date`, `Added at`
-
-   Use a dedicated tab if your existing columns differ. The script refuses mismatched
-   headers rather than altering existing data. It does not create missing tabs.
-5. Install the optional Google dependencies:
-
-```sh
-python -m venv .venv
-source .venv/bin/activate
+```powershell
 python -m pip install -r requirements.txt
 ```
 
-On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
+Run a local preview; no Google credentials are required:
 
-Run with your spreadsheet ID (the part between `/d/` and `/edit` in its URL):
-
-```sh
-python cyberintel.py --write-sheet \
-  --spreadsheet-id YOUR_SPREADSHEET_ID \
-  --credentials /path/outside/repo/service-account.json
+```powershell
+python cyberintel.py --scan-newsletters --max-articles 5 --output output/articles.csv
 ```
 
-Alternatively set `CYBERINTEL_SPREADSHEET_ID` and `GOOGLE_APPLICATION_CREDENTIALS`
-in your local shell. Never put credential contents into command arguments or source.
+The article CSV has one row per analyzed article. This preview does not require
+Google Sheets credentials, but it does require at least one AI-provider API key.
+Failed feeds, article fetches, and AI analyses are logged; the process returns a
+nonzero exit code if any part of the scan fails.
 
-## Data and reruns
+## Write AI results to Google Sheets
 
-- One row per article URL + CVE ID. Existing sheet rows are read before appending;
-  the same CVE in a different article gets its own row.
-- Dates come from the official CVE record's publication timestamp. `Added at` is
-  the collection timestamp in UTC. It is separate from the article publication date.
-- Products are the vendor/product labels supplied by the CNA in the CVE record.
-  They are not a complete version exposure assessment. Missing fields say `Unknown`;
-  rejected records are explicitly labeled.
-- Failed lookups are logged and skipped so they can be retried on a later run.
-  Existing rows are not refreshed automatically when CVE records change.
-- Feed windows are finite: this is recent-news collection, not historical backfill.
-- Do not run concurrent writers: deduplication is not an atomic transaction. If an
-  append has an uncertain network outcome, rerun to reread the sheet before retrying.
-- Exit code 0 means processing completed; 1 means an error or partial result. A
-  successful run may find zero CVEs. Check the logs and CSV rather than assuming
-  every feed article contains vulnerabilities.
-- CSV output escapes formula-like values; sheet writes use `RAW` values.
+1. Enable the **Google Sheets API** in a Google Cloud project.
+2. Create a service account and download its JSON key outside this repository.
+   Never commit or share the key.
+3. Share the target spreadsheet with the service account email as **Editor**.
+4. Set the spreadsheet ID and service-account file path in PowerShell:
 
-No scheduling is installed. Run manually while testing. AI extraction, email feeds,
-accounts, and a web UI are deliberately outside this first version.
+```powershell
+$env:CYBERINTEL_SPREADSHEET_ID = "your-spreadsheet-id"
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\path\outside\repo\service-account.json"
+```
+
+5. Run the scan with the explicit write option:
+
+```powershell
+python cyberintel.py --scan-newsletters --write-sheet --max-articles 5
+```
+
+Newsletter analyses go to the `Articles` tab by default. The script creates the
+header row in an empty tab, or requires an existing header to match exactly:
+
+`Article link`, `Source`, `Headline`, `Published date`, `Summary`, `Topics`,
+`Threats`, `CVEs`, `Severity`, `Recommended action`, `AI provider`, `Added at`
+
+Use `--tab "Your tab name"` to choose a different tab. Existing article links are
+not appended again. Only explicit `--write-sheet` runs access or modify Sheets.
+Use `--spreadsheet-id` and `--credentials` to override the environment variables.
+
+## CVE collection
+
+The original CVE mode remains available. It scans feed text for CVE IDs, looks up
+their official CVE records, and writes `output/vulnerabilities.csv` by default:
+
+```powershell
+python cyberintel.py --max-articles 5
+```
+
+Use `--fetch-articles` to include article-page text in CVE detection. To append
+these rows to a separate `Vulnerabilities` sheet tab:
+
+```powershell
+python cyberintel.py --write-sheet --max-articles 5
+```
+
+For a populated CVE tab, row 1 must exactly match:
+
+`Article link`, `CVE`, `Products affected`, `CVE published date`, `Added at`
+
+Rows are deduplicated by article URL + CVE ID. CVE publication dates come from
+the official CVE record; `Added at` is the UTC collection timestamp. CSV output
+escapes formula-like values, and Sheets writes use `RAW`.
 
 ## Tests
 
-```sh
+```powershell
 python -m unittest discover -s tests -v
 ```
 
-Tests use fixtures and mocks; they do not access your sheet. A live dry run requires
-access to your source hosts and `cveawg.mitre.org`. Google writes additionally require
-Google API access and your own service account credentials.
+Tests use fixtures and mocks. They do not call AI providers, fetch live feeds, or
+access Google Sheets.

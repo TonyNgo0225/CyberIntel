@@ -1,10 +1,10 @@
 [
   {
-    "name": "",
-    "url": ""
+    "name": "The Hacker News",
+    "url": "https://feeds.feedburner.com/TheHackersNews"
   },
   {
-    "name": "",
-    "url": ""
+    "name": "BleepingComputer",
+    "url": "https://www.bleepingcomputer.com/feed/"
   }
 ]
