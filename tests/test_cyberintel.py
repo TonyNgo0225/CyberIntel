@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import types
@@ -140,6 +141,30 @@ class CollectorTests(unittest.TestCase):
             app.csv_safe("=1+1"),
             "'=1+1"
         )
+
+    def test_load_dotenv_reads_json_values_without_overriding_shell(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                'TEST_CYBERINTEL_KEY="key with = and #"\n'
+                'TEST_CYBERINTEL_ID="sheet-id"\n',
+                encoding="utf-8"
+            )
+            with patch.dict(
+                os.environ,
+                {"TEST_CYBERINTEL_ID": "shell-value"},
+                clear=False
+            ):
+                app.load_dotenv(env_path)
+
+                self.assertEqual(
+                    os.environ["TEST_CYBERINTEL_KEY"],
+                    "key with = and #"
+                )
+                self.assertEqual(
+                    os.environ["TEST_CYBERINTEL_ID"],
+                    "shell-value"
+                )
 
     def test_article_html_removes_script_content(self):
         title, text = app.parse_article_html(

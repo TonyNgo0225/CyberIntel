@@ -505,6 +505,37 @@ def csv_safe(value):
     return text
 
 
+def load_dotenv(path=".env"):
+    """Load local JSON-quoted configuration without overriding shell settings."""
+    env_path = Path(path)
+    if not env_path.is_file():
+        return
+    with env_path.open(encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, separator, value = line.partition("=")
+            name = name.strip()
+            if not separator or not name or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise ValueError(f"Invalid setting in {env_path} at line {line_number}")
+            if name in os.environ:
+                continue
+            value = value.strip()
+            if value.startswith('"'):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError as error:
+                    raise ValueError(
+                        f"Invalid quoted setting in {env_path} at line {line_number}"
+                    ) from error
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Setting in {env_path} at line {line_number} must be a string"
+                    )
+            os.environ[name] = value
+
+
 def write_csv(rows, headers, output):
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -515,6 +546,12 @@ def write_csv(rows, headers, output):
 
 
 def main(argv=None):
+    try:
+        load_dotenv()
+    except (OSError, ValueError) as error:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+        LOG.error("%s", error)
+        return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sources", default="sources.json")
     parser.add_argument("--output")
@@ -549,13 +586,15 @@ def main(argv=None):
         if args.scan_newsletters:
             rows, failures = collect_articles(sources, args.max_articles)
             headers = ARTICLE_HEADERS
-            tab = args.tab or "Articles"
+            tab = args.tab or os.getenv("CYBERINTEL_ARTICLES_TAB", "Articles")
             append = append_articles_to_sheet
             output = args.output or "output/articles.csv"
         else:
             rows, failures = collect(sources, args.max_articles, args.fetch_articles)
             headers = HEADERS
-            tab = args.tab or "Vulnerabilities"
+            tab = args.tab or os.getenv(
+                "CYBERINTEL_VULNERABILITIES_TAB", "Vulnerabilities"
+            )
             append = append_to_sheet
             output = args.output or "output/vulnerabilities.csv"
         write_csv(rows, headers, output)

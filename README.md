@@ -5,7 +5,29 @@ Studio to analyze article pages, and falls back to Groq if Google AI Studio is
 unavailable. Results can be previewed as CSV or appended to Google Sheets. A
 separate CVE collection mode is also available.
 
-## Configure AI providers
+## Configure keys and Google Sheets
+
+First enable the Google Sheets API, create a service account, and download its
+JSON key outside the repository. On Windows, run the interactive setup script
+from the repository folder:
+
+```powershell
+.\setup.ps1
+```
+
+It prompts for the Google AI Studio and optional Groq keys (input is hidden), the
+spreadsheet ID, and the path to the Google service-account JSON key. It also asks
+for the result tab names and model names, then saves the settings to a local
+`.env` file. The collector loads that file automatically; shell environment
+variables take precedence. The setup script checks the service-account file and
+shows its email so you can share the spreadsheet with it as an Editor.
+
+The `.env` file contains API keys in plain text. It is excluded by `.gitignore`,
+but keep it private and do not upload or commit it. Keep the service-account key
+JSON outside the repository. Re-running setup prompts before replacing an
+existing `.env`.
+
+You can also set the configuration manually in your shell or `.env` file:
 
 Create an API key in Google AI Studio and, as a backup, a Groq API key. Set the
 keys in your local shell; do not put them in source files or commit them:
@@ -66,15 +88,18 @@ $env:GOOGLE_APPLICATION_CREDENTIALS = "C:\path\outside\repo\service-account.json
 python cyberintel.py --scan-newsletters --write-sheet --max-articles 5
 ```
 
-Newsletter analyses go to the `Articles` tab by default. The script creates the
-header row in an empty tab, or requires an existing header to match exactly:
+The script creates the header row in an empty tab, or requires an existing
+header to match exactly:
 
 `Article link`, `Source`, `Headline`, `Published date`, `Summary`, `Topics`,
 `Threats`, `CVEs`, `Severity`, `Recommended action`, `AI provider`, `Added at`
 
-Use `--tab "Your tab name"` to choose a different tab. Existing article links are
-not appended again. Only explicit `--write-sheet` runs access or modify Sheets.
-Use `--spreadsheet-id` and `--credentials` to override the environment variables.
+The setup script lets you choose both result tab names. Otherwise, newsletter
+analyses go to `Articles` and CVE results go to `Vulnerabilities`. Use
+`--tab "Your tab name"` to override the configured name for one run. Existing
+article links are not appended again. Only explicit `--write-sheet` runs access
+or modify Sheets. Use `--spreadsheet-id` and `--credentials` to override the
+saved settings.
 
 ## CVE collection
 
