@@ -1,0 +1,12 @@
+{
+  "assets": [
+    {
+      "name": "Example product name",
+      "vendor": "Example vendor",
+      "aliases": [
+        "Exact product name as it appears in advisories",
+        "Common product abbreviation"
+      ]
+    }
+  ]
+}

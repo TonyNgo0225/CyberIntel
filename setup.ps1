@@ -63,13 +63,13 @@ $vulnerabilitiesTab = Read-Host "CVE results tab name [Vulnerabilities]"
 if (-not $vulnerabilitiesTab.Trim()) {
     $vulnerabilitiesTab = "Vulnerabilities"
 }
-$geminiModel = Read-Host "Gemini model [gemini-2.5-flash]"
+$geminiModel = Read-Host "Gemini model [gemini-3.6-flash]"
 if (-not $geminiModel.Trim()) {
-    $geminiModel = "gemini-2.5-flash"
+    $geminiModel = "gemini-3.6-flash"
 }
-$groqModel = Read-Host "Groq model [llama-3.3-70b-versatile]"
+$groqModel = Read-Host "Groq model [openai/gpt-oss-120b]"
 if (-not $groqModel.Trim()) {
-    $groqModel = "llama-3.3-70b-versatile"
+    $groqModel = "openai/gpt-oss-120b"
 }
 
 $settings = [ordered]@{

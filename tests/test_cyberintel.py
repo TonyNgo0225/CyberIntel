@@ -166,6 +166,21 @@ class CollectorTests(unittest.TestCase):
                     "shell-value"
                 )
 
+    def test_load_dotenv_accepts_windows_path_quotes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                'TEST_CYBERINTEL_PATH="C:\\keys\\service-account.json"\n',
+                encoding="utf-8"
+            )
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("TEST_CYBERINTEL_PATH", None)
+                app.load_dotenv(env_path)
+                self.assertEqual(
+                    os.environ["TEST_CYBERINTEL_PATH"],
+                    "C:\\keys\\service-account.json"
+                )
+
     def test_article_html_removes_script_content(self):
         title, text = app.parse_article_html(
             b"<html><title>Threat update</title><script>secret()</script>"

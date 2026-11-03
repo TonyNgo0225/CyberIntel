@@ -38,9 +38,8 @@ $env:GROQ_API_KEY = "your-groq-key"
 ```
 
 Google AI Studio is tried first. Groq is used if Google AI Studio fails or its key
-is not set. The defaults are `gemini-2.5-flash` and
-`llama-3.3-70b-versatile`; override them with `GEMINI_MODEL` and `GROQ_MODEL` if
-needed.
+is not set. The defaults are `gemini-3.6-flash` and `openai/gpt-oss-120b`;
+override them with `GEMINI_MODEL` and `GROQ_MODEL` if needed.
 
 Edit `sources.json` to add or remove HTTPS RSS/Atom feeds. Two cybersecurity news
 feeds are included as starting sources. The article scanner fetches each feed and
@@ -48,6 +47,89 @@ its linked article page, then sends the text to the configured AI provider for a
 headline, date, concise summary, topics, threats, CVEs, severity, and recommended
 action. Article text is untrusted input and should be checked before acting on
 generated recommendations. Respect each publisher's terms and access policies.
+
+## Hourly inventory monitoring with GitHub Actions
+
+The hourly workflow is `.github/workflows/hourly-cyberintel.yml`. It reads HTTPS
+source URLs from the existing `Links` sheet tab, follows supported RSS feeds,
+checks up to five recent entries per feed per run, and writes only new findings
+that match your tracked assets to the existing `CVEs` tab. It runs at the top of
+each hour (UTC); GitHub may delay scheduled starts during busy periods. You can
+also run it manually from the repository's **Actions** tab.
+
+The scanner recognizes the news feeds for CyberPress, Cybersecurity News, The
+Hacker News, DataBreachToday, Dark Reading, BleepingComputer, The Register,
+Infosecurity Magazine, and Cybersecurity Dive. It can also inspect the specific
+Dark Reading article and the Tenable Plugins page listed in `Links`. Armis's CVE
+list is loaded dynamically and has no verified public feed, while Shodan is a
+search/API platform rather than a news feed; those two links are skipped with a
+warning. A future Shodan integration would need its API and explicitly scoped
+assets or network ranges.
+
+### Configure the tracked assets
+
+Keep the inventory private: this GitHub repository is public, so do not put your
+organization's software/hardware list in a tracked file. Add a repository Actions
+secret named `CYBERINTEL_INVENTORY_JSON` containing JSON in this shape:
+
+```json
+{
+  "assets": [
+    {
+      "name": "Example product name",
+      "vendor": "Example vendor",
+      "aliases": ["Exact product name", "Common product abbreviation"]
+    }
+  ]
+}
+```
+
+Use the real product and hardware names your organization runs, including
+version/product aliases that vendors use in vulnerability advisories. The
+scanner requires at least one asset and uses whole-name matching to reduce
+incidental matches. `inventory.example.json` is a public template; a local
+`inventory.json` is Git-ignored.
+
+### Add repository secrets
+
+In the public repository, open **Settings → Secrets and variables → Actions →
+New repository secret**, then add:
+
+| Secret name | Value |
+| --- | --- |
+| `CYBERINTEL_INVENTORY_JSON` | Your private asset inventory JSON |
+| `CYBERINTEL_SPREADSHEET_ID` | ID from the Google Sheet URL |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Entire service-account JSON key file contents |
+| `GOOGLE_AI_STUDIO_API_KEY` | Google AI Studio API key |
+| `GROQ_API_KEY` | Groq API key (optional fallback) |
+
+The service-account email must have **Editor** access to the spreadsheet. Secrets
+are injected at run time; the credential JSON is written only to the GitHub
+runner's temporary directory. Do not commit credentials, API keys, or the real
+asset inventory. Standard GitHub-hosted Actions runners are free for public
+repositories.
+
+After adding the workflow and secrets to the default branch, run it once
+manually from **Actions → Hourly CyberIntel inventory scan → Run workflow**.
+It creates a `ScanState` tab to avoid re-analyzing already processed articles.
+Changing the inventory causes recent feed items to be checked again against the
+updated asset list.
+It only appends rows to the existing `CVEs` tab when its headers exactly match:
+
+`Number`, `CVE`, `Affected Software/Hardware`, `Date/Time Found`, `Link`
+
+Numbers continue from the highest existing number; new CVEs in each run are
+ordered by year and numeric CVE ID. Existing CVEs are not appended twice.
+Confirmed inventory-matched CVEs are logged regardless of severity. Malware
+without a CVE is logged only when the AI classifies it as High/Critical and it
+matches a tracked asset; its CVE cell says `MALWARE (no CVE)`.
+
+For local testing, copy `inventory.example.json` to the ignored `inventory.json`,
+edit its assets, and run:
+
+```powershell
+python cyberintel.py --monitor-inventory --write-sheet --max-articles 5
+```
 
 ## Preview an AI newsletter scan
 
@@ -95,7 +177,7 @@ header to match exactly:
 `Threats`, `CVEs`, `Severity`, `Recommended action`, `AI provider`, `Added at`
 
 The setup script lets you choose both result tab names. Otherwise, newsletter
-analyses go to `Articles` and CVE results go to `Vulnerabilities`. Use
+analyses go to `Articles` and CVE results go to `CVEs`. Use
 `--tab "Your tab name"` to override the configured name for one run. Existing
 article links are not appended again. Only explicit `--write-sheet` runs access
 or modify Sheets. Use `--spreadsheet-id` and `--credentials` to override the
