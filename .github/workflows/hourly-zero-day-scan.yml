@@ -20,7 +20,6 @@ jobs:
       GOOGLE_AI_STUDIO_API_KEY: ${{ secrets.GOOGLE_AI_STUDIO_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       CYBERINTEL_SPREADSHEET_ID: ${{ secrets.CYBERINTEL_SPREADSHEET_ID }}
-      GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/cyberintel-service-account.json
       CYBERINTEL_LINKS_TAB: Links
       CYBERINTEL_APP_LIST_TAB: App List
       CYBERINTEL_EMAILS_TAB: Emails
@@ -61,9 +60,11 @@ jobs:
           if credentials.get("type") != "service_account":
               raise SystemExit("The Google credentials secret must be a service-account JSON key.")
 
-          path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
+          path = Path(os.environ["RUNNER_TEMP"]) / "cyberintel-service-account.json"
           path.write_text(json.dumps(credentials), encoding="utf-8")
           path.chmod(0o600)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"GOOGLE_APPLICATION_CREDENTIALS={path}\n")
           PY
 
       - name: Scan tracked apps and email critical zero-days
