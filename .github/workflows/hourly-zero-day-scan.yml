@@ -1,4 +1,4 @@
-name: Hourly CyberIntel inventory scan
+name: Hourly zero-day vulnerability scan
 
 on:
   schedule:
@@ -21,10 +21,13 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       CYBERINTEL_SPREADSHEET_ID: ${{ secrets.CYBERINTEL_SPREADSHEET_ID }}
       GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/cyberintel-service-account.json
-      CYBERINTEL_INVENTORY_FILE: ${{ runner.temp }}/cyberintel-inventory.json
       CYBERINTEL_LINKS_TAB: Links
+      CYBERINTEL_APP_LIST_TAB: App List
+      CYBERINTEL_EMAILS_TAB: Emails
       CYBERINTEL_VULNERABILITIES_TAB: CVEs
       CYBERINTEL_SCAN_STATE_TAB: ScanState
+      EMAIL_SMTP_USERNAME: ${{ secrets.EMAIL_SMTP_USERNAME }}
+      EMAIL_SMTP_PASSWORD: ${{ secrets.EMAIL_SMTP_PASSWORD }}
       GEMINI_MODEL: gemini-3.6-flash
       GROQ_MODEL: openai/gpt-oss-120b
     steps:
@@ -39,44 +42,29 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Prepare private configuration files
+      - name: Prepare Google Sheets credentials
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          CYBERINTEL_INVENTORY_JSON: ${{ secrets.CYBERINTEL_INVENTORY_JSON }}
         run: |
           python - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          credentials_raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-          if not credentials_raw:
+          raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+          if not raw:
               raise SystemExit("Missing GOOGLE_SERVICE_ACCOUNT_JSON repository secret.")
           try:
-              credentials = json.loads(credentials_raw)
+              credentials = json.loads(raw)
           except json.JSONDecodeError as error:
               raise SystemExit("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.") from error
           if credentials.get("type") != "service_account":
               raise SystemExit("The Google credentials secret must be a service-account JSON key.")
 
-          inventory_raw = os.environ.get("CYBERINTEL_INVENTORY_JSON", "")
-          if not inventory_raw:
-              raise SystemExit("Missing CYBERINTEL_INVENTORY_JSON repository secret.")
-          try:
-              inventory = json.loads(inventory_raw)
-          except json.JSONDecodeError as error:
-              raise SystemExit("CYBERINTEL_INVENTORY_JSON is not valid JSON.") from error
-          if not isinstance(inventory, dict) or not isinstance(inventory.get("assets"), list) or not inventory["assets"]:
-              raise SystemExit("CYBERINTEL_INVENTORY_JSON must contain a non-empty assets list.")
-
-          for target, payload in (
-              (os.environ["GOOGLE_APPLICATION_CREDENTIALS"], credentials),
-              (os.environ["CYBERINTEL_INVENTORY_FILE"], inventory),
-          ):
-              path = Path(target)
-              path.write_text(json.dumps(payload), encoding="utf-8")
-              path.chmod(0o600)
+          path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
+          path.write_text(json.dumps(credentials), encoding="utf-8")
+          path.chmod(0o600)
           PY
 
-      - name: Scan tracked assets and update Google Sheets
-        run: python cyberintel.py --monitor-inventory --write-sheet --max-articles 5 --inventory "$CYBERINTEL_INVENTORY_FILE"
+      - name: Scan tracked apps and email critical zero-days
+        run: python cyberintel.py --monitor-app-list --write-sheet --max-articles 5

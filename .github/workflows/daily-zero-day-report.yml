@@ -1,0 +1,78 @@
+name: Daily zero-day vulnerability report
+
+on:
+  schedule:
+    - cron: "0 15,16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CYBERINTEL_SPREADSHEET_ID: ${{ secrets.CYBERINTEL_SPREADSHEET_ID }}
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/cyberintel-service-account.json
+      CYBERINTEL_VULNERABILITIES_TAB: CVEs
+      CYBERINTEL_EMAILS_TAB: Emails
+      EMAIL_SMTP_USERNAME: ${{ secrets.EMAIL_SMTP_USERNAME }}
+      EMAIL_SMTP_PASSWORD: ${{ secrets.EMAIL_SMTP_PASSWORD }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check Pacific send time
+        id: schedule
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+          local_now = datetime.now(ZoneInfo("America/Los_Angeles"))
+          should_send = is_manual or local_now.hour == 8
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"should_send={str(should_send).lower()}\n")
+          print(f"Pacific time: {local_now:%Y-%m-%d %H:%M}; sending: {should_send}")
+          PY
+
+      - name: Install dependencies
+        if: steps.schedule.outputs.should_send == 'true'
+        run: python -m pip install -r requirements.txt
+
+      - name: Prepare Google Sheets credentials
+        if: steps.schedule.outputs.should_send == 'true'
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+          if not raw:
+              raise SystemExit("Missing GOOGLE_SERVICE_ACCOUNT_JSON repository secret.")
+          try:
+              credentials = json.loads(raw)
+          except json.JSONDecodeError as error:
+              raise SystemExit("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.") from error
+          if credentials.get("type") != "service_account":
+              raise SystemExit("The Google credentials secret must be a service-account JSON key.")
+
+          path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
+          path.write_text(json.dumps(credentials), encoding="utf-8")
+          path.chmod(0o600)
+          PY
+
+      - name: Email yesterday's zero-day findings
+        if: steps.schedule.outputs.should_send == 'true'
+        run: python cyberintel.py --daily-report

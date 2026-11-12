@@ -6,4 +6,3 @@ service-account*.json
 /project-30fec526-fe82-475c-a6e-48882aa482d0.json
 output/
 .env
-/inventory.json
