@@ -31,8 +31,10 @@ ones.
 The repository contains two workflows:
 
 - **Hourly zero-day vulnerability scan** analyzes up to five recent articles
-  from each supported source, appends new matching zero-day CVEs, and emails
-  each Critical CVE to the addresses in `Emails!B2:B`.
+  from each supported source, sends only articles whose text mentions a
+  zero-day to AI analysis (at most five candidate articles per run), appends
+  new matching zero-day CVEs, and emails each Critical CVE to the addresses in
+  `Emails!B2:B`. Other articles do not consume AI requests.
 - **Daily zero-day vulnerability report** emails the previous Pacific day's
   matching zero-day findings at 8:00 A.M. Pacific time. It checks at both
   corresponding UTC hours so the send time remains 8:00 A.M. across daylight
@@ -59,6 +61,14 @@ After pushing the workflows to the default branch and adding the secrets, open
 **Actions** and run **Hourly zero-day vulnerability scan** to test the setup.
 Review the run logs and the `CVEs` tab. The hourly workflow is also available
 from **Actions → Hourly zero-day vulnerability scan → Run workflow**.
+
+If an AI provider returns HTTP 429, its quota or rate limit is exhausted; the
+scanner now analyzes only zero-day candidates and caps AI analysis at five
+articles per run. Check the provider's quota if 429s continue. HTTP 403 from
+Groq means its key or selected model is not authorized; check the Groq console
+and key, then inspect the provider's returned error detail in the next run.
+Some publishers block GitHub-hosted runners or return invalid feed data, which
+can also appear as source-specific 403 or feed parsing errors.
 
 The workflows use the URLs in `Links`. Armis' supplied CVE page is
 JavaScript-loaded and Shodan's homepage is a search/API platform, so those links

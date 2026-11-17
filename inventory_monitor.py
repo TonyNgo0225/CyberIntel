@@ -27,7 +27,7 @@ CVE_HEADERS = [
 ]
 STATE_HEADERS = ["State key", "Article URL", "Checked at", "Result"]
 CVE_RE = cyberintel.CVE_RE
-ZERO_DAY_RE = re.compile(r"\bzero[\s-]?day\b", re.IGNORECASE)
+ZERO_DAY_RE = re.compile(r"\b(?:zero|0)[\s-]?day\b", re.IGNORECASE)
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.IGNORECASE)
 PACIFIC = ZoneInfo("America/Los_Angeles")
 SEVERITY_RANK = {
@@ -250,6 +250,24 @@ def _state_key(article, app_list_fingerprint):
     else:
         content_key = article["link"]
     return f"{content_key}#apps-{app_list_fingerprint}"
+
+
+def _article_has_zero_day_signal(article):
+    text = " ".join(
+        str(article.get(field, ""))
+        for field in ("title", "text")
+    )
+    return bool(ZERO_DAY_RE.search(text))
+
+
+def _set_feed_content_hash(article):
+    content = "\n".join(
+        str(article.get(field, ""))
+        for field in ("title", "published", "text")
+    )
+    article["content_hash"] = hashlib.sha256(
+        content.encode("utf-8")
+    ).hexdigest()[:16]
 
 
 def _resolve_sources(urls):
@@ -694,9 +712,12 @@ def run_monitor(
     app_list_tab="App List",
     emails_tab="Emails",
     max_articles=5,
+    max_ai_articles=5,
 ):
     if max_articles < 1:
         raise ValueError("max_articles must be greater than zero")
+    if max_ai_articles < 1:
+        raise ValueError("max_ai_articles must be greater than zero")
     service = cyberintel._sheet_service(credentials_path)
     assets = _read_app_list(service, spreadsheet_id, app_list_tab)
     app_list_fingerprint = hashlib.sha256(
@@ -717,6 +738,7 @@ def run_monitor(
     state_rows = []
     failures = 0
     processed = 0
+    ai_attempts = 0
     checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     for source in feeds:
@@ -729,6 +751,14 @@ def run_monitor(
             failures += 1
             continue
         for article in articles:
+            if ai_attempts >= max_ai_articles:
+                LOG.warning(
+                    "Reached the per-run AI analysis limit (%d); remaining articles "
+                    "will be checked on the next scan",
+                    max_ai_articles,
+                )
+                break
+            _set_feed_content_hash(article)
             key = _state_key(article, app_list_fingerprint)
             if key in seen_state:
                 continue
@@ -742,7 +772,12 @@ def run_monitor(
                 )[: cyberintel.MAX_ARTICLE_TEXT]
             except Exception as error:
                 LOG.warning("Article page %s failed; using its feed entry: %s", article["link"], error)
+            if not _article_has_zero_day_signal(article):
+                state_rows.append([key, article["link"], checked_at, "no zero-day signal"])
+                seen_state.add(key)
+                continue
             try:
+                ai_attempts += 1
                 found, provider, status = _process_article(
                     article, source["name"], assets, cve_cache
                 )
@@ -759,8 +794,12 @@ def run_monitor(
             except Exception as error:
                 LOG.error("Article analysis %s failed: %s", article["link"], error)
                 failures += 1
+        if ai_attempts >= max_ai_articles:
+            break
 
     for source in pages:
+        if ai_attempts >= max_ai_articles:
+            break
         try:
             article = _fetch_article_page(source["url"])
         except Exception as error:
@@ -770,7 +809,12 @@ def run_monitor(
         key = _state_key(article, app_list_fingerprint)
         if key in seen_state:
             continue
+        if not _article_has_zero_day_signal(article):
+            state_rows.append([key, article["link"], checked_at, "no zero-day signal"])
+            seen_state.add(key)
+            continue
         try:
+            ai_attempts += 1
             found, provider, status = _process_article(
                 article, source["name"], assets, cve_cache
             )

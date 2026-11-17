@@ -66,6 +66,23 @@ class InventoryMonitorTests(unittest.TestCase):
             [],
         )
 
+    def test_only_articles_with_zero_day_language_need_ai_analysis(self):
+        self.assertTrue(
+            monitor._article_has_zero_day_signal(
+                {"title": "Vendor patches zero-day flaw", "text": ""}
+            )
+        )
+        self.assertTrue(
+            monitor._article_has_zero_day_signal(
+                {"title": "Emergency 0-day patch", "text": ""}
+            )
+        )
+        self.assertFalse(
+            monitor._article_has_zero_day_signal(
+                {"title": "Ransomware attacks hospital", "text": "No CVE reported"}
+            )
+        )
+
     def test_duplicate_cve_findings_keep_the_highest_severity_and_all_apps(self):
         alerts = monitor._new_alerts(
             [],

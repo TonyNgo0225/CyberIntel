@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import sys
 import tempfile
 import types
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -41,6 +43,20 @@ RECORD = {
 
 
 class CollectorTests(unittest.TestCase):
+    @patch("cyberintel.urllib.request.urlopen")
+    def test_ai_http_errors_include_provider_reason_without_response_dump(self, urlopen):
+        body = json.dumps(
+            {"error": {"message": "API key is not authorized", "status": "PERMISSION_DENIED"}}
+        ).encode()
+        urlopen.side_effect = urllib.error.HTTPError(
+            "https://provider.invalid", 403, "Forbidden", {}, io.BytesIO(body)
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "HTTP 403: API key is not authorized PERMISSION_DENIED"
+        ):
+            app._post_json("https://provider.invalid", {}, {})
+
     def test_atom(self):
         data = b"""
         <feed xmlns="http://www.w3.org/2005/Atom">

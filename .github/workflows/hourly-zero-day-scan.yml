@@ -68,4 +68,4 @@ jobs:
           PY
 
       - name: Scan tracked apps and email critical zero-days
-        run: python cyberintel.py --monitor-app-list --write-sheet --max-articles 5
+        run: python cyberintel.py --monitor-app-list --write-sheet --max-articles 5 --max-ai-articles 5

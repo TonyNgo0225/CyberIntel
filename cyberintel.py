@@ -232,7 +232,24 @@ def _post_json(url, body, headers):
                 raise RuntimeError("AI provider response exceeds 5 MiB limit")
         return json.loads(data)
     except urllib.error.HTTPError as error:
-        raise RuntimeError(f"AI provider returned HTTP {error.code}") from None
+        detail = ""
+        try:
+            response_body = error.read(2048).decode("utf-8", errors="replace")
+            payload = json.loads(response_body)
+            if isinstance(payload, dict):
+                provider_error = payload.get("error", {})
+                if isinstance(provider_error, dict):
+                    detail = " ".join(
+                        " ".join(str(provider_error.get(key, "")).split())
+                        for key in ("message", "status", "code", "type")
+                        if provider_error.get(key)
+                    )
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+        finally:
+            error.close()
+        suffix = f": {detail[:240]}" if detail else ""
+        raise RuntimeError(f"AI provider returned HTTP {error.code}{suffix}") from None
     except (urllib.error.URLError, TimeoutError):
         raise RuntimeError("AI provider request failed") from None
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -558,6 +575,7 @@ def main(argv=None):
     parser.add_argument("--sources", default="sources.json")
     parser.add_argument("--output")
     parser.add_argument("--max-articles", type=int, default=20)
+    parser.add_argument("--max-ai-articles", type=int, default=5)
     parser.add_argument("--fetch-articles", action="store_true")
     parser.add_argument(
         "--scan-newsletters",
@@ -585,6 +603,8 @@ def main(argv=None):
     try:
         if args.max_articles < 1:
             raise ValueError("--max-articles must be greater than zero")
+        if args.max_ai_articles < 1:
+            raise ValueError("--max-ai-articles must be greater than zero")
         if args.monitor_app_list:
             if not args.write_sheet:
                 raise ValueError(
@@ -610,6 +630,7 @@ def main(argv=None):
                 app_list_tab=os.getenv("CYBERINTEL_APP_LIST_TAB", "App List"),
                 emails_tab=os.getenv("CYBERINTEL_EMAILS_TAB", "Emails"),
                 max_articles=args.max_articles,
+                max_ai_articles=args.max_ai_articles,
             ) else 0
         if args.daily_report:
             if not args.spreadsheet_id:
