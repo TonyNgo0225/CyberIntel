@@ -43,6 +43,28 @@ RECORD = {
 
 
 class CollectorTests(unittest.TestCase):
+    @patch("cyberintel.time.sleep")
+    @patch("cyberintel.urllib.request.urlopen")
+    def test_ai_post_retries_transient_server_errors(self, urlopen, sleep):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"ok": true}'
+        urlopen.side_effect = [
+            urllib.error.HTTPError(
+                "https://provider.invalid",
+                503,
+                "Service Unavailable",
+                {},
+                io.BytesIO(b'{"error":{"message":"temporarily unavailable"}}'),
+            ),
+            response,
+        ]
+
+        result = app._post_json("https://provider.invalid", {}, {})
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
     @patch("cyberintel.urllib.request.urlopen")
     def test_ai_http_errors_include_provider_reason_without_response_dump(self, urlopen):
         body = json.dumps(
@@ -56,6 +78,29 @@ class CollectorTests(unittest.TestCase):
             RuntimeError, "HTTP 403: API key is not authorized PERMISSION_DENIED"
         ):
             app._post_json("https://provider.invalid", {}, {})
+
+    @patch("cyberintel.time.sleep")
+    @patch("cyberintel.urllib.request.urlopen")
+    def test_quota_errors_without_retry_after_fail_without_repeating(
+        self, urlopen, sleep
+    ):
+        urlopen.side_effect = urllib.error.HTTPError(
+            "https://provider.invalid",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(
+                b'{"error":{"message":"Daily request quota exhausted","status":"RESOURCE_EXHAUSTED"}}'
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "HTTP 429: Daily request quota exhausted"
+        ):
+            app._post_json("https://provider.invalid", {}, {})
+
+        urlopen.assert_called_once()
+        sleep.assert_not_called()
 
     def test_atom(self):
         data = b"""

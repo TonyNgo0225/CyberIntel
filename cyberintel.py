@@ -219,41 +219,71 @@ def parse_article_html(data):
 
 
 def _post_json(url, body, headers):
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", **headers},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            data = response.read(MAX_RESPONSE + 1)
-            if len(data) > MAX_RESPONSE:
-                raise RuntimeError("AI provider response exceeds 5 MiB limit")
-        return json.loads(data)
-    except urllib.error.HTTPError as error:
-        detail = ""
+    encoded_body = json.dumps(body).encode("utf-8")
+    for attempt in range(3):
+        request = urllib.request.Request(
+            url,
+            data=encoded_body,
+            headers={"Content-Type": "application/json", **headers},
+            method="POST",
+        )
         try:
-            response_body = error.read(2048).decode("utf-8", errors="replace")
-            payload = json.loads(response_body)
-            if isinstance(payload, dict):
-                provider_error = payload.get("error", {})
-                if isinstance(provider_error, dict):
-                    detail = " ".join(
-                        " ".join(str(provider_error.get(key, "")).split())
-                        for key in ("message", "status", "code", "type")
-                        if provider_error.get(key)
-                    )
-        except (OSError, json.JSONDecodeError, TypeError):
-            pass
-        finally:
-            error.close()
-        suffix = f": {detail[:240]}" if detail else ""
-        raise RuntimeError(f"AI provider returned HTTP {error.code}{suffix}") from None
-    except (urllib.error.URLError, TimeoutError):
-        raise RuntimeError("AI provider request failed") from None
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RuntimeError("AI provider returned invalid JSON") from None
+            with urllib.request.urlopen(request, timeout=45) as response:
+                data = response.read(MAX_RESPONSE + 1)
+                if len(data) > MAX_RESPONSE:
+                    raise RuntimeError("AI provider response exceeds 5 MiB limit")
+            return json.loads(data)
+        except urllib.error.HTTPError as error:
+            detail = ""
+            retry_after = ""
+            try:
+                response_body = error.read(2048).decode("utf-8", errors="replace")
+                payload = json.loads(response_body)
+                if isinstance(payload, dict):
+                    provider_error = payload.get("error", {})
+                    if isinstance(provider_error, dict):
+                        detail = " ".join(
+                            " ".join(str(provider_error.get(key, "")).split())
+                            for key in ("message", "status", "code", "type")
+                            if provider_error.get(key)
+                        )
+            except (OSError, json.JSONDecodeError, TypeError):
+                pass
+            finally:
+                if error.headers:
+                    retry_after = error.headers.get("Retry-After", "")
+                error.close()
+
+            retryable = error.code in (500, 502, 503, 504) or (
+                error.code == 429 and retry_after
+            )
+            if retryable and attempt < 2:
+                try:
+                    delay = min(max(int(retry_after), 1), 60)
+                except ValueError:
+                    delay = 2**attempt
+                LOG.warning(
+                    "AI provider returned HTTP %d; retrying in %d second(s)",
+                    error.code,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+            suffix = f": {detail[:240]}" if detail else ""
+            raise RuntimeError(
+                f"AI provider returned HTTP {error.code}{suffix}"
+            ) from None
+        except (urllib.error.URLError, TimeoutError):
+            if attempt < 2:
+                delay = 2**attempt
+                LOG.warning(
+                    "AI provider request failed; retrying in %d second(s)", delay
+                )
+                time.sleep(delay)
+                continue
+            raise RuntimeError("AI provider request failed") from None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError("AI provider returned invalid JSON") from None
 
 
 def _gemini_analyze(article, api_key, model):
